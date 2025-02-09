@@ -1,0 +1,102 @@
+import requests
+import sqlite3
+import pandas as pd
+import datetime
+import time
+import logging
+import random
+
+# Set up logging
+logging.basicConfig(filename="etl_pipeline.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# OpenWeatherMap API Configuration
+API_KEY = "your_api_key_here"  # Replace with your API key
+CITY = "New York"
+BASE_URL = "https://api.openweathermap.org/data/2.5/weather"
+
+# SQLite Database Configuration
+DB_NAME = "weather_data.db"
+TABLE_NAME = "weather"
+
+# List of synthetic weather conditions
+WEATHER_CONDITIONS = ["Clear", "Cloudy", "Rainy", "Stormy", "Snowy", "Foggy", "Windy"]
+
+
+def extract_weather_data(city):
+    """Extract weather data from OpenWeatherMap API."""
+    try:
+        params = {"q": city, "appid": API_KEY, "units": "metric"}
+        response = requests.get(BASE_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
+        logging.info(f"Successfully extracted weather data for {city}.")
+        return data
+    except requests.exceptions.RequestException as e:
+        logging.error(f"API request failed. Generating synthetic data. Error: {e}")
+        return generate_synthetic_data(city)
+
+
+def generate_synthetic_data(city):
+    """Generate synthetic weather data when API fails."""
+    logging.info(f"Generating synthetic weather data for {city}.")
+    return {
+        "name": city,
+        "main": {
+            "temp": round(random.uniform(-10, 40), 2),  # Random temperature (-10 to 40°C)
+            "humidity": random.randint(10, 100),  # Humidity (10-100%)
+            "pressure": random.randint(980, 1050),  # Pressure (980-1050 hPa)
+        },
+        "weather": [{"description": random.choice(WEATHER_CONDITIONS)}],  # Random weather condition
+        "wind": {"speed": round(random.uniform(0, 20), 2)},  # Wind speed (0-20 m/s)
+    }
+
+
+def transform_weather_data(data):
+    """Transform the extracted weather data into a structured format."""
+    try:
+        if not data:
+            return None
+
+        transformed_data = {
+            "city": data["name"],
+            "temperature": data["main"]["temp"],
+            "humidity": data["main"]["humidity"],
+            "pressure": data["main"]["pressure"],
+            "weather": data["weather"][0]["description"],
+            "wind_speed": data["wind"]["speed"],
+            "date_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        df = pd.DataFrame([transformed_data])
+        logging.info("Successfully transformed weather data.")
+        return df
+    except Exception as e:
+        logging.error(f"Error transforming weather data: {e}")
+        return None
+
+
+def load_data_to_db(df, db_name, table_name):
+    """Load the transformed data into an SQLite database."""
+    try:
+        conn = sqlite3.connect(db_name)
+        df.to_sql(table_name, conn, if_exists="append", index=False)
+        conn.close()
+        logging.info("Successfully loaded data into database.")
+    except Exception as e:
+        logging.error(f"Error loading data into database: {e}")
+
+
+def run_etl():
+    """Run the ETL pipeline."""
+    logging.info("ETL pipeline started.")
+    data = extract_weather_data(CITY)
+    transformed_data = transform_weather_data(data)
+    if transformed_data is not None:
+        load_data_to_db(transformed_data, DB_NAME, TABLE_NAME)
+    logging.info("ETL pipeline completed.")
+
+
+if __name__ == "__main__":
+    while True:
+        run_etl()
+        time.sleep(3600)  # Run every 1 hour
